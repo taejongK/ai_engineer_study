@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attention</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]})"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mka" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk3" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+<main>
+  <h1>Attention</h1>
+  <p class="summary">각 토큰이 다른 토큰들을 관련도만큼 참고해서 자기 벡터를 새로 만드는 연산. 토큰 사이에 정보가 이동하는 유일한 통로다.</p>
+
+  <h2>직관: 왜 필요한가</h2>
+  <figure>
+    <svg viewBox="0 0 720 240" role="img" aria-label="마지막 토큰이 같은 두 문장이 서로 다른 다음 토큰을 예측해야 하는 상황">
+      <rect class="b" x="20" y="50" width="90" height="40" rx="6"/><text x="65" y="75" text-anchor="middle">나는</text>
+      <rect class="b3" x="125" y="50" width="90" height="40" rx="6"/><text x="170" y="75" text-anchor="middle">오늘</text>
+      <rect class="b" x="230" y="50" width="90" height="40" rx="6"/><text x="275" y="75" text-anchor="middle">아침에</text>
+      <rect class="ba" x="335" y="50" width="90" height="40" rx="6"/><text x="380" y="75" text-anchor="middle">밥을</text>
+      <path class="l3" d="M170,48 C170,15 380,15 380,46" marker-end="url(#ar3)"/>
+      <text class="ta3" x="275" y="16" text-anchor="middle">"오늘"의 정보</text>
+      <path class="ln" d="M425,70 H516" marker-end="url(#ar)"/>
+      <text class="m" x="470" y="62" text-anchor="middle">예측</text>
+      <rect class="b2" x="520" y="50" width="110" height="40" rx="6"/><text x="575" y="75" text-anchor="middle">먹었다</text>
+
+      <text class="m" x="380" y="120" text-anchor="middle">두 문장에서 "밥을"의 임베딩 벡터는 완전히 같다</text>
+
+      <rect class="b" x="20" y="180" width="90" height="40" rx="6"/><text x="65" y="205" text-anchor="middle">나는</text>
+      <rect class="b3" x="125" y="180" width="90" height="40" rx="6"/><text x="170" y="205" text-anchor="middle">내일</text>
+      <rect class="b" x="230" y="180" width="90" height="40" rx="6"/><text x="275" y="205" text-anchor="middle">아침에</text>
+      <rect class="ba" x="335" y="180" width="90" height="40" rx="6"/><text x="380" y="205" text-anchor="middle">밥을</text>
+      <path class="l3" d="M170,178 C170,145 380,145 380,176" marker-end="url(#ar3)"/>
+      <text class="ta3" x="275" y="148" text-anchor="middle">"내일"의 정보</text>
+      <path class="ln" d="M425,200 H516" marker-end="url(#ar)"/>
+      <text class="m" x="470" y="192" text-anchor="middle">예측</text>
+      <rect class="b2" x="520" y="180" width="110" height="40" rx="6"/><text x="575" y="205" text-anchor="middle">먹을</text>
+    </svg>
+    <figcaption>다음 토큰을 예측하는 것은 마지막 토큰 "밥을"의 벡터다. 앞 토큰의 정보가 들어와야 두 문장에 다른 답을 낼 수 있다.</figcaption>
+  </figure>
+  <p>Attention은 예측에 필요한 다른 토큰의 정보를, 예측을 하는 토큰의 벡터 안으로 옮겨 온다. 어느 토큰을 얼마나 볼지는 고정되어 있지 않고, 들어온 문장의 내용에 따라 매번 새로 계산된다.</p>
+
+  <h2>동작 원리</h2>
+  <p>"나는 오늘 아침에 밥을" 다음 토큰을 예측하는 상황을 2차원 벡터로 따라간다. 아래 그림들은 연결되어 있어서, 토큰을 누르면 그 토큰 기준으로 전부 다시 계산된다.</p>
+
+  <h3>① 토큰 벡터에서 q, k, v를 만든다</h3>
+  <figure>
+    <svg viewBox="0 0 720 220" role="img" aria-label="토큰 벡터 하나에 행렬 세 개를 각각 곱해 q, k, v를 만드는 그림">
+      <text class="m" x="105" y="80" text-anchor="middle">"밥을"의 토큰 벡터</text>
+      <rect class="ba" x="20" y="90" width="170" height="40" rx="6"/><text x="105" y="115" text-anchor="middle">x = [2, 1]</text>
+      <path class="ln" d="M190,110 L276,40" marker-end="url(#ar)"/>
+      <path class="ln" d="M190,110 H276" marker-end="url(#ar)"/>
+      <path class="ln" d="M190,110 L276,180" marker-end="url(#ar)"/>
+      <rect class="b" x="280" y="20" width="100" height="36" rx="6"/><text x="330" y="43" text-anchor="middle">× W<tspan dy="4" font-size="10">Q</tspan></text>
+      <rect class="b" x="280" y="92" width="100" height="36" rx="6"/><text x="330" y="115" text-anchor="middle">× W<tspan dy="4" font-size="10">K</tspan></text>
+      <rect class="b" x="280" y="164" width="100" height="36" rx="6"/><text x="330" y="187" text-anchor="middle">× W<tspan dy="4" font-size="10">V</tspan></text>
+      <path class="ln" d="M380,38 H436" marker-end="url(#ar)"/>
+      <path class="ln" d="M380,110 H436" marker-end="url(#ar)"/>
+      <path class="ln" d="M380,182 H436" marker-end="url(#ar)"/>
+      <rect class="b" x="440" y="20" width="110" height="36" rx="6"/><text x="495" y="43" text-anchor="middle">q = [3, 1]</text>
+      <rect class="b" x="440" y="92" width="110" height="36" rx="6"/><text x="495" y="115" text-anchor="middle">k = [1, 2]</text>
+      <rect class="b" x="440" y="164" width="110" height="36" rx="6"/><text x="495" y="187" text-anchor="middle">v = [4, 1]</text>
+      <text class="ta" x="565" y="43">Query: 고를 때 쓴다</text>
+      <text class="ta" x="565" y="115">Key: 골라질 때 쓴다</text>
+      <text class="ta" x="565" y="187">Value: 넘겨줄 내용</text>
+    </svg>
+    <figcaption>같은 벡터 x에 서로 다른 행렬을 곱해 용도가 다른 벡터 세 개를 만든다.</figcaption>
+  </figure>
+  <table>
+    <tr><th></th><th>W<sub>Q</sub>, W<sub>K</sub>, W<sub>V</sub></th><th>q, k, v</th></tr>
+    <tr><td>정체</td><td>행렬. 모델의 파라미터</td><td>벡터. 계산 결과</td></tr>
+    <tr><td>개수</td><td>층·헤드마다 한 벌, 모든 토큰이 공유</td><td>토큰마다 하나씩</td></tr>
+    <tr><td>언제 바뀌나</td><td>학습할 때만</td><td>입력 문장이 바뀔 때마다</td></tr>
+  </table>
+  <figure>
+    <div class="controls pick"></div>
+    <table id="qkv"></table>
+    <figcaption>모든 토큰이 같은 행렬을 쓴다. W<sub>Q</sub> = [[1, 0], [1, 1]], W<sub>K</sub> = [[0, 1], [1, 0]], W<sub>V</sub> = [[2, 0], [0, 1]] (설명용으로 정한 값)</figcaption>
+  </figure>
+
+  <h3>② Query와 Key를 내적해 점수를 낸다</h3>
+  <p>q와 k는 토큰마다 하나씩이고, 토큰 쌍마다 있는 것은 점수다. 한 토큰의 q를 모든 토큰의 k와 내적하므로 토큰 4개면 4×4 점수표가 나온다.</p>
+  <figure>
+    <div class="controls pick"></div>
+    <table id="scores"></table>
+    <figcaption>행은 "보는 토큰"의 q, 열은 "보이는 토큰"의 k. ✕는 자기보다 뒤에 있어 볼 수 없는 토큰이다 (causal mask).</figcaption>
+  </figure>
+
+  <h3>③ 점수를 가중치로 바꾸고, 그 비율로 Value를 섞는다</h3>
+  <p>점수에 softmax를 적용하면 합이 1인 가중치가 된다. 가중치는 "누구를 얼마나", Value는 "무엇을"에 해당한다.</p>
+  <figure>
+    <div class="controls pick"></div>
+    <table id="mix"></table>
+    <p class="result" id="result"></p>
+    <figcaption>가중치는 소수 셋째 자리로 반올림한 값을 그대로 곱했다. attention 출력은 원래 벡터를 대체하지 않고 더해진다. 토큰 자신의 정보는 남고 가져온 정보가 그 위에 얹힌다.</figcaption>
+  </figure>
+  <p>기본으로 선택된 "밥을"은 "오늘"에 가장 큰 가중치를 준다. 그 결과 "밥을"의 새 벡터에는 "오늘"의 Value가 가장 많이 섞여 있다.</p>
+
+  <h3>왜 벡터를 셋으로 나누는가</h3>
+  <table>
+    <tr><th>구분</th><th>이유</th></tr>
+    <tr><td>Key ≠ Value</td><td>골라지는 기준과 넘겨주는 내용이 다르다. "동물"이 골라지는 이유는 "지시 가능한 명사"라는 점이지만, 넘겨줄 것은 "생물, 단수" 같은 의미 내용이다.</td></tr>
+    <tr><td>Query ≠ Key</td><td>관계가 비대칭이다. "그것"은 "동물"이 필요하지만 반대는 아니다. 둘이 같은 벡터면 점수표가 대칭이 되고 자기 자신만 크게 보게 된다.</td></tr>
+  </table>
+  <p>이름은 딕셔너리 조회에서 왔다. 딕셔너리는 query와 정확히 일치하는 key 하나의 value를 돌려주고, attention은 모든 key와의 유사도만큼 value를 섞어서 돌려준다.</p>
+
+  <h2>이론</h2>
+  <div class="theory">
+    $$\mathrm{Attention}(Q, K, V) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$$
+    <p>$X \in \mathbb{R}^{n \times d}$: 토큰 벡터 $n$개를 행으로 쌓은 행렬 (①의 표에서 x 열).</p>
+    <p>$Q = XW_Q,\; K = XW_K,\; V = XW_V$: 각 토큰의 q, k, v를 행으로 쌓은 행렬. $W_Q, W_K \in \mathbb{R}^{d \times d_k}$, $W_V \in \mathbb{R}^{d \times d_v}$.</p>
+    <p>$QK^\top \in \mathbb{R}^{n \times n}$: ②의 점수표. $(i, j)$ 원소가 $q_i \cdot k_j$.</p>
+    <p>$\mathrm{softmax}$: 행마다 적용. $\alpha_{ij} = \dfrac{\exp(s_{ij})}{\sum_{j'} \exp(s_{ij'})}$ 가 ③의 가중치.</p>
+    <p>마지막의 $V$ 곱: ③의 가중 평균. 출력의 $i$번째 행은 $\sum_j \alpha_{ij} v_j$.</p>
+  </div>
+
+  <h3>√d<sub>k</sub>로 나누는 이유</h3>
+  <div class="theory">
+    <p>q와 k의 각 성분이 평균 0, 분산 1이고 서로 독립이면 내적 $q \cdot k = \sum_{m=1}^{d_k} q_m k_m$ 의 분산은 $d_k$다. 차원이 클수록 점수의 크기가 커진다.</p>
+    <p>점수가 크면 softmax가 한 토큰에 거의 1을 주고 나머지는 0에 가까워지며, 이 영역에서는 기울기가 매우 작아 학습이 느려진다. $\sqrt{d_k}$로 나누면 분산이 1로 맞춰진다.</p>
+  </div>
+
+  <h3>Causal mask</h3>
+  <div class="theory">
+    $$s_{ij} = \begin{cases} q_i \cdot k_j / \sqrt{d_k} & j \le i \\ -\infty & j > i \end{cases}$$
+    <p>뒤 토큰의 점수를 $-\infty$로 두면 softmax 후 가중치가 0이 된다. 다음 토큰을 예측하는 모델(GPT 계열)이 정답을 미리 보지 못하게 한다. ②의 ✕가 이것이다.</p>
+  </div>
+
+  <h3>Multi-head attention</h3>
+  <figure>
+    <svg viewBox="0 0 720 200" role="img" aria-label="여러 헤드가 각자 attention을 계산하고 결과를 이어 붙이는 그림">
+      <rect class="ba" x="20" y="80" width="110" height="40" rx="6"/><text x="75" y="105" text-anchor="middle">토큰 벡터들</text>
+      <path class="ln" d="M130,100 L186,37" marker-end="url(#ar)"/>
+      <path class="ln" d="M130,100 H186" marker-end="url(#ar)"/>
+      <path class="ln" d="M130,100 L186,163" marker-end="url(#ar)"/>
+      <rect class="b" x="190" y="15" width="200" height="40" rx="6"/><text x="290" y="40" text-anchor="middle">헤드 1 · 자기만의 W 세 개</text>
+      <rect class="b" x="190" y="80" width="200" height="40" rx="6"/><text x="290" y="105" text-anchor="middle">헤드 2 · 자기만의 W 세 개</text>
+      <rect class="b" x="190" y="145" width="200" height="40" rx="6"/><text x="290" y="170" text-anchor="middle">헤드 3 · 자기만의 W 세 개</text>
+      <path class="ln" d="M390,35 L446,95" marker-end="url(#ar)"/>
+      <path class="ln" d="M390,100 H446" marker-end="url(#ar)"/>
+      <path class="ln" d="M390,165 L446,105" marker-end="url(#ar)"/>
+      <rect class="b" x="450" y="80" width="100" height="40" rx="6"/><text x="500" y="105" text-anchor="middle">이어 붙임</text>
+      <path class="ln" d="M550,100 H596" marker-end="url(#ar)"/>
+      <rect class="b" x="600" y="80" width="100" height="40" rx="6"/><text x="650" y="105" text-anchor="middle">× W<tspan dy="4" font-size="10">O</tspan></text>
+    </svg>
+    <figcaption>같은 attention 계산을 여러 벌 병렬로 돌린다. 헤드마다 행렬이 달라 서로 다른 관계를 볼 수 있다.</figcaption>
+  </figure>
+  <div class="theory">
+    $$\mathrm{MultiHead}(X) = \big[\,\mathrm{head}_1;\, \dots;\, \mathrm{head}_h\,\big]\, W_O$$
+    <p>$h$: 헤드 수. 보통 $d_k = d_v = d / h$ 로 두어 전체 계산량을 헤드 하나일 때와 비슷하게 유지한다.</p>
+    <p>$W_O \in \mathbb{R}^{h d_v \times d}$: 이어 붙인 결과를 다시 $d$차원으로 섞는 행렬.</p>
+  </div>
+
+  <h3>종류와 비용</h3>
+  <table>
+    <tr><th>종류</th><th>Q의 출처</th><th>K, V의 출처</th></tr>
+    <tr><td>Self-attention</td><td colspan="2">같은 문장 (이 문서에서 다룬 것)</td></tr>
+    <tr><td>Cross-attention</td><td>디코더</td><td>인코더 출력</td></tr>
+  </table>
+  <p>점수표가 $n \times n$ 이므로 계산량과 메모리가 토큰 수의 제곱에 비례한다.</p>
+
+  <h2>관련 개념</h2>
+  <ul>
+    <li><a href="transformer.html">Transformer</a>: attention을 쌓아 만든 모델 구조. attention 출력이 그 뒤에 어떻게 쓰이는지, 학습은 어떻게 되는지.</li>
+  </ul>
+
+  <h2>이력</h2>
+  <ul class="history">
+    <li>2026-11-23 최초 정리</li>
+  </ul>
+</main>
+<script>
+const T = ['나는', '오늘', '아침에', '밥을'];
+const X = [[1, 0], [0, 2], [1, 1], [2, 1]];
+const W = {q: [[1, 0], [1, 1]], k: [[0, 1], [1, 0]], v: [[2, 0], [0, 1]]};
+const mul = (x, M) => [x[0] * M[0][0] + x[1] * M[1][0], x[0] * M[0][1] + x[1] * M[1][1]];
+const Q = X.map(x => mul(x, W.q)), K = X.map(x => mul(x, W.k)), V = X.map(x => mul(x, W.v));
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+const r = n => +n.toFixed(3);
+const vec = a => '[' + a.map(r).join(', ') + ']';
+const el = id => document.getElementById(id);
+let cur = 3;
+
+function render() {
+  document.querySelectorAll('.pick').forEach(p => {
+    p.innerHTML = '보는 토큰: ' + T.map((t, i) => `<button class="tok${i === cur ? ' hl' : ''}" data-i="${i}">${t}</button>`).join('');
+  });
+
+  el('qkv').innerHTML = '<tr><th>토큰</th><th>x</th><th>q = x·W<sub>Q</sub></th><th>k = x·W<sub>K</sub></th><th>v = x·W<sub>V</sub></th></tr>' +
+    T.map((t, i) => `<tr><td>${t}</td><td class="num">${vec(X[i])}</td><td class="num${i === cur ? ' hl' : ''}">${vec(Q[i])}</td><td class="num">${vec(K[i])}</td><td class="num">${vec(V[i])}</td></tr>`).join('');
+
+  el('scores').innerHTML = '<tr><th>q \\ k</th>' + T.map(t => `<th>${t}</th>`).join('') + '</tr>' +
+    T.map((t, i) => `<tr${i === cur ? ' class="hl"' : ''}><th>${t}</th>` +
+      T.map((_, j) => j > i ? '<td class="c off">✕</td>' : `<td class="c num">${dot(Q[i], K[j])}</td>`).join('') + '</tr>').join('');
+
+  const z = T.map((_, j) => j > cur ? null : dot(Q[cur], K[j]) / Math.SQRT2);
+  const total = z.reduce((s, v) => v === null ? s : s + Math.exp(v), 0);
+  const out = [0, 0];
+  let rows = '';
+  T.forEach((t, j) => {
+    if (z[j] === null) { rows += `<tr class="off"><td>${t}</td><td colspan="6">뒤에 있는 토큰이라 볼 수 없음</td></tr>`; return; }
+    const w = Math.round(Math.exp(z[j]) / total * 1000) / 1000, wv = V[j].map(n => n * w);
+    out[0] += wv[0]; out[1] += wv[1];
+    rows += `<tr><td>${t}</td><td class="num">${vec(K[j])}</td><td class="num">${dot(Q[cur], K[j])}</td><td class="num">${r(z[j])}</td>` +
+      `<td class="num"><span class="bar" style="width:${Math.round(w * 110)}px"></span>${w.toFixed(3)}</td><td class="num">${vec(V[j])}</td><td class="num">${vec(wv)}</td></tr>`;
+  });
+  el('mix').innerHTML = '<tr><th>토큰</th><th>k</th><th>점수 q·k</th><th>÷ √2</th><th>가중치 (softmax)</th><th>v</th><th>가중치 × v</th></tr>' +
+    rows + `<tr class="hl"><td colspan="6">합계 = attention 출력</td><td class="num">${vec(out)}</td></tr>`;
+  el('result').innerHTML = `"${T[cur]}"의 q = <span class="num">${vec(Q[cur])}</span> &nbsp;·&nbsp; 새 벡터 = x + 출력 = ` +
+    `<span class="num">${vec(X[cur])} + ${vec(out)} = <b>${vec([X[cur][0] + out[0], X[cur][1] + out[1]])}</b></span>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.pick button');
+  if (b) { cur = +b.dataset.i; render(); }
+});
+render();
+</script>
+</body>
+</html>

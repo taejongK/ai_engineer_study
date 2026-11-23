@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transformer</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]})"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mka" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk2" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+<main>
+  <h1>Transformer</h1>
+  <p class="summary">"attention으로 다른 토큰의 정보를 가져오고 → FFN으로 가공한다"를 여러 층 반복하는 모델 구조. GPT 계열은 이 구조로 다음 토큰의 확률을 계산한다.</p>
+  <p>이 문서는 GPT 같은 디코더 모델을 기준으로 설명한다. attention 자체의 계산은 <a href="attention.html">Attention</a> 문서에 있다.</p>
+
+  <h2>직관: 문장이 들어가서 다음 토큰이 나오기까지</h2>
+  <figure>
+    <svg viewBox="0 0 720 480" role="img" aria-label="문장이 토큰 벡터가 되고 여러 층을 거쳐 다음 토큰의 확률표가 되는 전체 흐름">
+      <rect class="b" x="200" y="10" width="300" height="40" rx="6"/><text x="350" y="35" text-anchor="middle">나는 오늘 아침에 밥을</text>
+      <text class="m" x="530" y="35">문장</text>
+      <path class="ln" d="M350,50 V75" marker-end="url(#ar)"/>
+      <rect class="b" x="200" y="78" width="300" height="40" rx="6"/><text x="350" y="103" text-anchor="middle">토크나이저</text>
+      <text class="m" x="530" y="103">정수(토큰 ID) 4개</text>
+      <path class="ln" d="M350,118 V143" marker-end="url(#ar)"/>
+      <rect class="b" x="200" y="146" width="300" height="40" rx="6"/><text x="350" y="171" text-anchor="middle">임베딩 표 조회 + 위치 정보</text>
+      <text class="m" x="530" y="171">토큰 벡터 4개</text>
+      <path class="ln" d="M350,186 V229" marker-end="url(#ar)"/>
+      <rect class="dash" x="185" y="208" width="330" height="132" rx="8"/>
+      <text class="m" x="505" y="225" text-anchor="end">× N층</text>
+      <rect class="ba" x="215" y="232" width="270" height="40" rx="6"/><text x="350" y="257" text-anchor="middle">Attention</text>
+      <text class="m" x="530" y="257">다른 토큰의 정보를 가져옴</text>
+      <path class="ln" d="M350,272 V287" marker-end="url(#ar)"/>
+      <rect class="ba" x="215" y="290" width="270" height="40" rx="6"/><text x="350" y="315" text-anchor="middle">FFN</text>
+      <text class="m" x="530" y="315">가져온 정보를 가공</text>
+      <path class="ln" d="M350,330 V359" marker-end="url(#ar)"/>
+      <rect class="b" x="200" y="362" width="300" height="40" rx="6"/><text x="350" y="387" text-anchor="middle">출력 행렬 + softmax</text>
+      <text class="m" x="530" y="387">어휘 전체의 확률표</text>
+      <path class="ln" d="M350,402 V427" marker-end="url(#ar)"/>
+      <rect class="b2" x="200" y="430" width="300" height="40" rx="6"/><text x="350" y="455" text-anchor="middle">다음 토큰: 먹었다</text>
+      <path class="l2" d="M200,450 H150 V30 H196" marker-end="url(#ar2)"/>
+      <text class="ta2" x="138" y="240" text-anchor="middle" transform="rotate(-90 138 240)">문장 끝에 붙이고 다시 실행</text>
+    </svg>
+    <figcaption>층을 지나는 동안 데이터는 항상 "토큰마다 벡터 하나" 모양이다. 숫자 내용만 문맥이 반영된 값으로 바뀐다.</figcaption>
+  </figure>
+
+  <h2>동작 원리</h2>
+
+  <h3>① 토큰 벡터 만들기</h3>
+  <p>토크나이저가 문장을 조각(토큰)으로 나누고 번호로 바꾼다. 임베딩 표는 행이 어휘 수만큼 있는 행렬이고, 토큰 번호에 해당하는 행을 그대로 꺼낸다. 계산이 아니라 조회다.</p>
+  <figure>
+    <table>
+      <tr><th>ID</th><th>토큰</th><th>벡터 (4차원이라고 가정)</th></tr>
+      <tr><td class="num">0</td><td>!</td><td class="num">[ 0.1, -0.3,  0.8,  0.0]</td></tr>
+      <tr><td class="c" colspan="3">…</td></tr>
+      <tr><td class="num">15</td><td>나는</td><td class="num">[ 0.2, -1.1,  0.5,  0.3]</td></tr>
+      <tr><td class="c" colspan="3">…</td></tr>
+      <tr class="hl"><td class="num">9031</td><td>밥을</td><td class="num">[ 1.3,  0.4, -0.2,  0.9]</td></tr>
+      <tr><td class="c" colspan="3">…</td></tr>
+      <tr><td class="num">49999</td><td>…</td><td class="num">[-0.7,  0.9,  0.1, -0.4]</td></tr>
+    </table>
+    <figcaption>토큰 ID가 9031이면 9031번 행이 "밥을"의 벡터다. 표의 숫자는 무작위로 시작해 학습으로 조정된다.</figcaption>
+  </figure>
+  <p>임베딩 표는 토큰이 몇 번째에 있는지 모른다. 그래서 위치마다 정해진 벡터를 더해 첫 층의 입력을 만든다. 둘째 층부터는 앞 층의 출력이 입력이 된다.</p>
+
+  <h3>② 층 하나: attention → FFN</h3>
+  <figure>
+    <svg viewBox="0 0 760 240" role="img" aria-label="토큰 벡터에 attention 출력을 더하고, 다시 FFN 출력을 더하는 층 하나의 구조">
+      <rect class="dash" x="100" y="40" width="540" height="188" rx="8"/>
+      <text class="m" x="630" y="58" text-anchor="end">층 하나 · N번 반복</text>
+      <text x="45" y="160" text-anchor="middle">토큰 벡터</text>
+      <path class="ln" d="M85,155 H146" marker-end="url(#ar)"/>
+      <rect class="ba" x="150" y="130" width="140" height="50" rx="6"/><text x="220" y="160" text-anchor="middle">Attention</text>
+      <path class="ln" d="M290,155 H323" marker-end="url(#ar)"/>
+      <circle class="b" cx="340" cy="155" r="14"/><text x="340" y="160" text-anchor="middle">+</text>
+      <path class="ln" d="M354,155 H416" marker-end="url(#ar)"/>
+      <rect class="ba" x="420" y="130" width="140" height="50" rx="6"/><text x="490" y="160" text-anchor="middle">FFN</text>
+      <path class="ln" d="M560,155 H593" marker-end="url(#ar)"/>
+      <circle class="b" cx="610" cy="155" r="14"/><text x="610" y="160" text-anchor="middle">+</text>
+      <path class="ln" d="M624,155 H676" marker-end="url(#ar)"/>
+      <text x="715" y="160" text-anchor="middle">새 벡터</text>
+      <path class="la" d="M115,155 V88 H340 V138" marker-end="url(#ara)"/>
+      <path class="la" d="M385,155 V88 H610 V138" marker-end="url(#ara)"/>
+      <text class="ta" x="227" y="80" text-anchor="middle">원래 벡터를 그대로 더함</text>
+      <text class="ta" x="497" y="80" text-anchor="middle">원래 벡터를 그대로 더함</text>
+      <text class="m" x="220" y="205" text-anchor="middle">다른 토큰을 본다</text>
+      <text class="m" x="490" y="205" text-anchor="middle">토큰 하나만 본다</text>
+    </svg>
+    <figcaption>attention과 FFN의 출력은 벡터를 대체하지 않고 더해진다 (residual 연결).</figcaption>
+  </figure>
+  <table>
+    <tr><th>부품</th><th>하는 일</th><th>다른 토큰을 보는가</th></tr>
+    <tr><td>임베딩</td><td>토큰 번호를 벡터로</td><td>아니오</td></tr>
+    <tr class="hl"><td>Attention</td><td>다른 토큰의 정보를 가져옴</td><td><b>예</b></td></tr>
+    <tr><td>FFN</td><td>가져온 정보를 가공 (차원을 늘림 → 음수를 0으로 → 다시 줄임)</td><td>아니오</td></tr>
+    <tr><td>출력 행렬</td><td>벡터를 확률표로</td><td>아니오</td></tr>
+  </table>
+  <p>토큰 사이에 정보가 이동하는 곳은 attention뿐이다. attention을 빼면 모델은 마지막 단어 하나만 보고 다음 단어를 고르게 된다.</p>
+
+  <h3>③ 마지막 벡터를 확률표로</h3>
+  <p>마지막 층을 나온 벡터를 출력 행렬에 곱하면 어휘 전체에 대한 점수가 나오고, softmax로 확률이 된다. 다음 토큰을 정하는 데는 마지막 위치("밥을")의 벡터를 쓴다.</p>
+  <figure>
+    <table>
+      <tr><th>후보 토큰</th><th>확률</th></tr>
+      <tr class="hl"><td>먹었다</td><td class="num"><span class="bar" style="width:186px"></span>0.62</td></tr>
+      <tr><td>먹고</td><td class="num"><span class="bar" style="width:42px"></span>0.14</td></tr>
+      <tr><td>먹는다</td><td class="num"><span class="bar" style="width:24px"></span>0.08</td></tr>
+      <tr><td>지었다</td><td class="num"><span class="bar" style="width:9px"></span>0.03</td></tr>
+      <tr><td>… (나머지 약 5만 개)</td><td class="num">0.13</td></tr>
+    </table>
+    <figcaption>"나는 오늘 아침에 밥을" 다음 토큰의 확률표 (설명용 숫자).</figcaption>
+  </figure>
+
+  <h3>④ 생성: 하나 뽑고, 붙이고, 다시</h3>
+  <figure>
+    <p><span class="tok">나는</span><span class="tok">오늘</span><span class="tok">아침에</span><span class="tok hl">밥을</span> → <span class="tok new">먹었다</span></p>
+    <p><span class="tok">나는</span><span class="tok">오늘</span><span class="tok">아침에</span><span class="tok">밥을</span><span class="tok hl">먹었다</span> → <span class="tok new">.</span></p>
+    <figcaption>파란 토큰의 마지막 벡터가 주황 토큰을 예측한다. 뽑은 토큰을 끝에 붙여 전체 과정을 다시 돌린다.</figcaption>
+  </figure>
+  <p>앞 토큰들은 뒤를 볼 수 없어서 새 토큰이 붙어도 계산 결과가 바뀌지 않는다. 그래서 앞 토큰의 Key와 Value를 저장해 두고 새 토큰의 Query만 새로 계산한다 (KV cache).</p>
+
+  <h2>학습</h2>
+  <p>학습은 무작위 숫자로 시작한 파라미터를, 예측이 틀릴 때마다 덜 틀리는 방향으로 조금씩 옮기는 일의 반복이다.</p>
+
+  <h3>① 문장에서 문제 만들기</h3>
+  <p>정답을 사람이 달 필요가 없다. 문장을 한 칸 밀면 각 위치의 "다음 토큰"이 정답이 된다.</p>
+  <figure>
+    <table>
+      <tr><th>위치</th><th>모델이 보는 것</th><th>정답</th></tr>
+      <tr><td class="c">1</td><td><span class="tok hl">나는</span></td><td><span class="tok new">오늘</span></td></tr>
+      <tr><td class="c">2</td><td><span class="tok">나는</span><span class="tok hl">오늘</span></td><td><span class="tok new">아침에</span></td></tr>
+      <tr><td class="c">3</td><td><span class="tok">나는</span><span class="tok">오늘</span><span class="tok hl">아침에</span></td><td><span class="tok new">밥을</span></td></tr>
+      <tr><td class="c">4</td><td><span class="tok">나는</span><span class="tok">오늘</span><span class="tok">아침에</span><span class="tok hl">밥을</span></td><td><span class="tok new">먹었다</span></td></tr>
+    </table>
+    <figcaption>"나는 오늘 아침에 밥을 먹었다" 한 문장에서 예측 문제 4개가 나온다.</figcaption>
+  </figure>
+
+  <h3>② 한 번에 풀기: causal mask</h3>
+  <p>문장을 통째로 넣되, 각 위치가 자기와 자기 앞만 볼 수 있게 attention을 막는다. 그러면 정답을 베끼지 못하면서 4문제가 한 번의 계산으로 풀린다.</p>
+  <figure>
+    <table>
+      <tr><th>보는 토큰 \ 보이는 토큰</th><th>나는</th><th>오늘</th><th>아침에</th><th>밥을</th></tr>
+      <tr><th>나는</th><td class="c hl">○</td><td class="c off">✕</td><td class="c off">✕</td><td class="c off">✕</td></tr>
+      <tr><th>오늘</th><td class="c hl">○</td><td class="c hl">○</td><td class="c off">✕</td><td class="c off">✕</td></tr>
+      <tr><th>아침에</th><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c off">✕</td></tr>
+      <tr><th>밥을</th><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+    </table>
+    <figcaption>각 행이 한 위치의 시야다.</figcaption>
+  </figure>
+
+  <h3>③ 얼마나 틀렸는지: loss</h3>
+  <p>각 위치의 확률표에서 정답 토큰에 준 확률 p만 본다. loss는 −ln(p)이고, 문장의 loss는 위치들의 평균이다.</p>
+  <figure>
+    <div class="controls"><label>정답에 준 확률 p <input type="range" id="p" min="0.01" max="1" step="0.01" value="0.1"></label><span id="pv" class="num"></span></div>
+    <svg viewBox="0 0 420 230" style="max-width:460px" role="img" aria-label="정답 확률 p에 따른 loss 곡선">
+      <path class="ln" d="M50,15 V195 H400"/>
+      <text class="m" x="225" y="222" text-anchor="middle">정답에 준 확률 p</text>
+      <text class="m" x="50" y="210" text-anchor="middle">0</text><text class="m" x="390" y="210" text-anchor="middle">1</text>
+      <text class="m" x="40" y="199" text-anchor="end">0</text><text class="m" x="40" y="24" text-anchor="end">4.6</text>
+      <text class="m" x="18" y="105" text-anchor="middle" transform="rotate(-90 18 105)">loss</text>
+      <polyline id="curve" class="la" points=""/>
+      <circle id="dot" r="6" class="b2"/>
+    </svg>
+    <figcaption>정답 확률이 1에 가까우면 loss는 0에 가깝고, 낮을수록 급격히 커진다. 학습 전에는 p ≈ 1/50000 이라 loss ≈ 10.8이다.</figcaption>
+  </figure>
+
+  <h3>④ 파라미터 고치기</h3>
+  <p>파라미터 숫자 하나하나에 대해 "이 숫자를 조금 키우면 loss가 얼마나 변하는가"(기울기)를 구하고, loss가 줄어드는 쪽으로 조금 옮긴다.</p>
+  <figure>
+    <svg viewBox="0 0 720 180" role="img" aria-label="예측은 앞으로, 틀렸다는 신호는 뒤로 흘러가며 모든 부품의 파라미터를 고치는 그림">
+      <path class="ln" d="M10,35 H706" marker-end="url(#ar)"/>
+      <text class="m" x="360" y="25" text-anchor="middle">순전파: 문장을 넣어 예측을 만든다</text>
+      <rect class="b" x="10" y="65" width="120" height="50" rx="6"/><text x="70" y="95" text-anchor="middle">임베딩 표</text>
+      <path class="ln" d="M130,90 H160"/>
+      <rect class="b" x="160" y="65" width="120" height="50" rx="6"/><text x="220" y="87" text-anchor="middle">Attention</text>
+      <text class="m" x="220" y="105" text-anchor="middle">W<tspan dy="3" font-size="9">Q</tspan><tspan dy="-3">, W</tspan><tspan dy="3" font-size="9">K</tspan><tspan dy="-3">, W</tspan><tspan dy="3" font-size="9">V</tspan></text>
+      <path class="ln" d="M280,90 H310"/>
+      <rect class="b" x="310" y="65" width="120" height="50" rx="6"/><text x="370" y="95" text-anchor="middle">FFN</text>
+      <path class="ln" d="M430,90 H460"/>
+      <rect class="b" x="460" y="65" width="120" height="50" rx="6"/><text x="520" y="95" text-anchor="middle">출력 행렬</text>
+      <path class="ln" d="M580,90 H610"/>
+      <rect class="b2" x="610" y="65" width="100" height="50" rx="6"/><text x="660" y="95" text-anchor="middle">loss</text>
+      <path class="l2" d="M710,145 H14" marker-end="url(#ar2)"/>
+      <text class="ta2" x="360" y="168" text-anchor="middle">역전파: 틀린 만큼 각 부품의 숫자를 고친다</text>
+    </svg>
+    <figcaption>"먹었다"의 확률이 낮았다는 신호가 계산이 지나온 길을 거꾸로 따라간다.</figcaption>
+  </figure>
+  <table>
+    <tr><th>부품</th><th>고쳐지는 방향</th></tr>
+    <tr><td>출력 행렬</td><td>마지막 벡터가 정답 토큰의 점수를 더 높이도록</td></tr>
+    <tr><td>FFN</td><td>가져온 정보를 정답을 가리키는 쪽으로 가공하도록</td></tr>
+    <tr><td>W<sub>V</sub></td><td>참고한 토큰에서 더 쓸모 있는 내용을 넘겨주도록</td></tr>
+    <tr><td>W<sub>Q</sub>, W<sub>K</sub></td><td>도움이 되는 토큰을 더 많이 보도록 (그 쌍의 q·k가 커지게)</td></tr>
+    <tr><td>임베딩 표</td><td>문장에 나온 토큰들의 행을 더 쓸모 있는 값으로</td></tr>
+  </table>
+  <p>"어느 토큰을 봐라"라고 지시하는 사람은 없다. attention이 관련 있는 토큰을 보게 되는 것은 구조가 보장하는 것이 아니라, 수많은 문장에서 loss를 줄인 결과다.</p>
+
+  <h3>학습과 생성의 차이</h3>
+  <table>
+    <tr><th></th><th>학습</th><th>생성</th></tr>
+    <tr><td>입력</td><td>완성된 문장</td><td>사용자가 준 앞부분</td></tr>
+    <tr><td>쓰는 출력</td><td>모든 위치의 확률표</td><td>마지막 위치의 확률표</td></tr>
+    <tr><td>그 다음</td><td>정답과 비교해 파라미터 수정</td><td>토큰 하나를 뽑아 끝에 붙이고 다시 실행</td></tr>
+    <tr><td>파라미터</td><td>바뀜</td><td>고정</td></tr>
+  </table>
+
+  <h2>이론</h2>
+  <h3>순전파</h3>
+  <div class="theory">
+    $$x_i^{(0)} = E[t_i] + p_i$$
+    <p>$t_i$: $i$번째 토큰의 ID. $E \in \mathbb{R}^{|V| \times d}$: 임베딩 표 ($|V|$는 어휘 수). $p_i$: 위치 $i$의 위치 벡터.</p>
+    $$h = x + \mathrm{Attn}(\mathrm{LN}(x)), \qquad x' = h + \mathrm{FFN}(\mathrm{LN}(h))$$
+    <p>층 하나의 계산 (②의 그림). $\mathrm{LN}$은 벡터의 크기를 맞춰 주는 Layer Normalization이다. GPT 계열은 위처럼 attention·FFN 앞에 두고(Pre-LN), 2017년 원 논문은 더한 뒤에 둔다(Post-LN).</p>
+    $$\mathrm{FFN}(x) = W_2\, \sigma(W_1 x + b_1) + b_2$$
+    <p>$W_1$이 차원을 늘리고(보통 $4d$), $\sigma$가 비선형 함수(ReLU, GELU 등), $W_2$가 다시 $d$차원으로 줄인다. 토큰마다 따로 적용된다.</p>
+    $$P(t_{i+1} \mid t_1, \dots, t_i) = \mathrm{softmax}\big(x_i^{(N)} W_U\big)$$
+    <p>$x_i^{(N)}$: 마지막($N$번째) 층을 나온 $i$번째 위치의 벡터. $W_U \in \mathbb{R}^{d \times |V|}$: 출력 행렬. 결과가 ③의 확률표다.</p>
+  </div>
+  <h3>학습</h3>
+  <div class="theory">
+    $$\mathcal{L} = -\frac{1}{n} \sum_{i=1}^{n} \ln P(t_{i+1} \mid t_1, \dots, t_i)$$
+    <p>cross-entropy loss. 각 위치에서 정답 토큰에 준 확률의 $-\ln$을 평균한 값이다 (학습 ③의 곡선).</p>
+    $$\theta \leftarrow \theta - \eta\, \nabla_\theta \mathcal{L}$$
+    <p>$\theta$: 모든 파라미터 ($E$, 각 층의 $W_Q, W_K, W_V, W_1, W_2$, $W_U$ 등). $\nabla_\theta \mathcal{L}$: 기울기. $\eta$: 학습률. 예: $w = 0.500$, 기울기 $+2.0$, $\eta = 0.001$ 이면 $w = 0.498$.</p>
+  </div>
+
+  <h3>인코더와 디코더</h3>
+  <figure>
+    <div class="cols">
+      <table>
+        <tr><th colspan="4">인코더: 전체를 본다</th></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+      </table>
+      <table>
+        <tr><th colspan="4">디코더: 앞만 본다</th></tr>
+        <tr><td class="c hl">○</td><td class="c off">✕</td><td class="c off">✕</td><td class="c off">✕</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c off">✕</td><td class="c off">✕</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c off">✕</td></tr>
+        <tr><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td><td class="c hl">○</td></tr>
+      </table>
+    </div>
+    <figcaption>두 구조의 차이는 attention에서 각 토큰이 볼 수 있는 범위다.</figcaption>
+  </figure>
+  <table>
+    <tr><th></th><th>용도</th><th>대표 모델</th></tr>
+    <tr><td>인코더</td><td>문장을 이해해 벡터로 (분류, 검색용 임베딩)</td><td>BERT</td></tr>
+    <tr><td>디코더</td><td>다음 토큰 생성</td><td>GPT 계열</td></tr>
+    <tr><td>인코더 + 디코더</td><td>입력 문장을 다른 문장으로 (번역). 디코더가 cross-attention으로 인코더 출력을 참조</td><td>2017년 원 논문, T5</td></tr>
+  </table>
+
+  <h2>관련 개념</h2>
+  <ul>
+    <li><a href="attention.html">Attention</a>: Query, Key, Value가 무엇이고 가중치가 어떻게 계산되는지.</li>
+  </ul>
+
+  <h2>이력</h2>
+  <ul class="history">
+    <li>2026-11-23 최초 정리</li>
+  </ul>
+</main>
+<script>
+const X0 = 50, W = 340, Y0 = 195, S = 39;   // 축 원점과 배율 (loss 4.6 ≈ 180px)
+const px = p => X0 + p * W, py = p => Y0 + Math.log(p) * S;
+let pts = '';
+for (let p = 0.01; p <= 1.0001; p += 0.01) pts += px(p).toFixed(1) + ',' + py(p).toFixed(1) + ' ';
+document.getElementById('curve').setAttribute('points', pts);
+const slider = document.getElementById('p'), dot = document.getElementById('dot'), pv = document.getElementById('pv');
+function show() {
+  const p = +slider.value;
+  dot.setAttribute('cx', px(p)); dot.setAttribute('cy', py(p));
+  pv.textContent = `p = ${p.toFixed(2)}  →  loss = ${(-Math.log(p)).toFixed(2)}`;
+}
+slider.addEventListener('input', show);
+show();
+</script>
+</body>
+</html>

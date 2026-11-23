@@ -1,3 +1,7 @@
 # 공부 기록 (시간순)
 
 날짜별로 그날 공부한 타이틀만 적는다. 최신 날짜가 위.
+
+## 2026-11-23
+- [Attention](concepts/attention.html)
+- [Transformer](concepts/transformer.html)

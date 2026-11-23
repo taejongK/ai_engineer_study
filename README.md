@@ -7,4 +7,6 @@
 
 ## 카테고리별 인덱스
 
-아직 정리된 개념이 없다.
+### Transformer 구조
+- [Attention](concepts/attention.html) — Query, Key, Value로 다른 토큰의 정보를 가져오는 연산
+- [Transformer](concepts/transformer.html) — attention과 FFN을 쌓은 모델 구조, 생성과 학습 과정
