@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RNN</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]})"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mka" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk2" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk3" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+<main>
+  <h1>RNN</h1>
+  <p class="summary">같은 계산 덩어리(셀) 하나를 토큰마다 반복해 쓰면서, 지금까지 읽은 내용을 벡터 하나(은닉 상태 h)에 담아 다음 위치로 넘기는 모델. 길이가 다른 문장도 같은 모델로 읽을 수 있지만, 문장 전체를 h 하나에 눌러 담아야 하고 앞 위치의 결과가 있어야 다음 위치를 계산할 수 있어서 한 문장 안에서는 병렬 계산이 안 된다.</p>
+
+  <h2>직관: 셀 하나를 반복해 쓰고, 읽은 내용을 옆으로 넘긴다</h2>
+  <figure>
+    <svg viewBox="0 0 760 250" role="img" aria-label="일반 신경망은 입력 칸 수가 고정되어 있고, RNN은 셀 하나에 토큰을 하나씩 넣으며 출력을 다시 입력으로 돌린다">
+      <text x="185" y="18" text-anchor="middle">일반 신경망 (FFN)</text>
+      <rect class="b" x="40" y="60" width="250" height="44" rx="6"/><text x="165" y="87" text-anchor="middle">FFN · 입력 칸 4개</text>
+      <rect class="b" x="20" y="170" width="58" height="34" rx="6"/><text x="49" y="192" text-anchor="middle">나는</text>
+      <rect class="b" x="88" y="170" width="58" height="34" rx="6"/><text x="117" y="192" text-anchor="middle">오늘</text>
+      <rect class="b" x="156" y="170" width="58" height="34" rx="6"/><text x="185" y="192" text-anchor="middle">아침에</text>
+      <rect class="b" x="224" y="170" width="58" height="34" rx="6"/><text x="253" y="192" text-anchor="middle">밥을</text>
+      <rect class="dash" x="294" y="170" width="62" height="34" rx="6"/><text class="ta2" x="325" y="192" text-anchor="middle">먹었다</text>
+      <path class="ln" d="M49,170 V108" marker-end="url(#ar)"/>
+      <path class="ln" d="M117,170 V108" marker-end="url(#ar)"/>
+      <path class="ln" d="M185,170 V108" marker-end="url(#ar)"/>
+      <path class="ln" d="M253,170 V108" marker-end="url(#ar)"/>
+      <text class="ta2" x="325" y="150" text-anchor="middle">넣을 칸 없음</text>
+      <text class="m" x="185" y="232" text-anchor="middle">칸 수가 정해져 있고, 토큰 사이의 순서를 따로 다루지 않는다</text>
+
+      <path class="dash" d="M385,10 V240"/>
+
+      <text x="575" y="18" text-anchor="middle">RNN</text>
+      <path class="la" d="M630,98 H690 V50 H460 V82 H516" marker-end="url(#ara)"/>
+      <text class="ta" x="575" y="42" text-anchor="middle">나온 h를 다시 입력으로 (순환)</text>
+      <rect class="ba" x="520" y="60" width="110" height="44" rx="6"/><text x="575" y="87" text-anchor="middle">셀</text>
+      <path class="ln" d="M630,82 H700" marker-end="url(#ar)"/><text x="722" y="87" text-anchor="middle">h<tspan dy="4" font-size="10">t</tspan></text>
+      <rect class="b" x="525" y="170" width="100" height="34" rx="6"/><text x="575" y="192" text-anchor="middle">토큰 x<tspan dy="4" font-size="10">t</tspan></text>
+      <path class="ln" d="M575,170 V108" marker-end="url(#ar)"/>
+      <text class="m" x="585" y="145">한 번에 하나씩</text>
+      <text class="m" x="575" y="232" text-anchor="middle">토큰이 몇 개든 같은 셀로 차례로 읽는다</text>
+    </svg>
+    <figcaption>FFN은 입력 크기가 정해져 있다. RNN은 토큰을 하나씩 받으므로 문장 길이가 달라도 상관없다.</figcaption>
+  </figure>
+  <p>RNN은 Recurrent Neural Network(순환 신경망)의 줄임말이다. "순환"은 셀의 출력이 다음 계산의 입력으로 다시 돌아온다는 뜻이다. 일반 신경망(FFN)은 입력 크기가 고정이고 순서를 모르지만, RNN은 토큰을 하나씩 받고 읽은 내용을 은닉 상태 h에 담아 넘긴다.</p>
+
+  <figure>
+    <svg viewBox="0 0 720 190" role="img" aria-label="셀 하나는 이전 기억 h t-1과 지금 토큰 x t를 받아 새 기억 h t 하나를 내놓는다">
+      <rect class="ba" x="20" y="30" width="170" height="40" rx="6"/><text x="105" y="55" text-anchor="middle">이전 기억 h<tspan dy="4" font-size="10">t−1</tspan></text>
+      <rect class="b" x="20" y="120" width="170" height="40" rx="6"/><text x="105" y="145" text-anchor="middle">지금 토큰 x<tspan dy="4" font-size="10">t</tspan></text>
+      <path class="la" d="M190,50 L276,82" marker-end="url(#ara)"/>
+      <path class="ln" d="M190,140 L276,108" marker-end="url(#ar)"/>
+      <text class="m" x="232" y="52" text-anchor="middle">× W<tspan dy="4" font-size="9">h</tspan></text>
+      <text class="m" x="232" y="148" text-anchor="middle">× W<tspan dy="4" font-size="9">x</tspan></text>
+      <rect class="b" x="280" y="70" width="190" height="50" rx="6"/><text x="375" y="92" text-anchor="middle">더하고 (+ b)</text><text x="375" y="111" text-anchor="middle">tanh로 누르기</text>
+      <path class="la" d="M470,95 H526" marker-end="url(#ara)"/>
+      <rect class="ba" x="530" y="75" width="170" height="40" rx="6"/><text x="615" y="100" text-anchor="middle">새 기억 h<tspan dy="4" font-size="10">t</tspan></text>
+      <text class="m" x="375" y="178" text-anchor="middle">입력 둘, 출력 하나. W<tspan dy="4" font-size="9">h</tspan><tspan dy="-4">, W</tspan><tspan dy="4" font-size="9">x</tspan><tspan dy="-4">, b는 셀 안의 파라미터</tspan></text>
+    </svg>
+    <figcaption>셀은 "이전 기억"과 "지금 토큰"을 섞어 "새 기억"을 만든다. 새 기억은 다음 칸의 "이전 기억"이 된다.</figcaption>
+  </figure>
+
+  <figure>
+    <svg viewBox="0 0 720 250" role="img" aria-label="같은 셀을 네 번 써서 은닉 상태 h1부터 h4를 차례로 만들고, h4로 다음 토큰을 예측하는 흐름">
+      <text class="m" x="590" y="22" text-anchor="middle">다음 토큰 "먹었다" 예측</text>
+      <path class="ln" d="M590,70 V34" marker-end="url(#ar)"/>
+      <text class="ta" x="270" y="44" text-anchor="middle">네 칸 모두 같은 셀 · 같은 W<tspan dy="4" font-size="10">h</tspan><tspan dy="-4">, W</tspan><tspan dy="4" font-size="10">x</tspan><tspan dy="-4">, b</tspan></text>
+      <rect class="ba" x="60" y="70" width="100" height="40" rx="6"/><text x="110" y="95" text-anchor="middle">h1</text>
+      <rect class="ba" x="220" y="70" width="100" height="40" rx="6"/><text x="270" y="95" text-anchor="middle">h2</text>
+      <rect class="ba" x="380" y="70" width="100" height="40" rx="6"/><text x="430" y="95" text-anchor="middle">h3</text>
+      <rect class="ba" x="540" y="70" width="100" height="40" rx="6"/><text x="590" y="95" text-anchor="middle">h4</text>
+      <path class="la" d="M160,90 H216" marker-end="url(#ara)"/>
+      <path class="la" d="M320,90 H376" marker-end="url(#ara)"/>
+      <path class="la" d="M480,90 H536" marker-end="url(#ara)"/>
+      <rect class="b" x="60" y="160" width="100" height="36" rx="6"/><text x="110" y="183" text-anchor="middle">나는</text>
+      <rect class="b" x="220" y="160" width="100" height="36" rx="6"/><text x="270" y="183" text-anchor="middle">오늘</text>
+      <rect class="b" x="380" y="160" width="100" height="36" rx="6"/><text x="430" y="183" text-anchor="middle">아침에</text>
+      <rect class="b" x="540" y="160" width="100" height="36" rx="6"/><text x="590" y="183" text-anchor="middle">밥을</text>
+      <path class="ln" d="M110,160 V114" marker-end="url(#ar)"/>
+      <path class="ln" d="M270,160 V114" marker-end="url(#ar)"/>
+      <path class="ln" d="M430,160 V114" marker-end="url(#ar)"/>
+      <path class="ln" d="M590,160 V114" marker-end="url(#ar)"/>
+      <text class="m" x="360" y="222" text-anchor="middle">파란 화살표: 앞 위치의 은닉 상태가 다음 위치의 입력이 된다</text>
+      <text class="m" x="360" y="242" text-anchor="middle">문장이 10토큰이면 같은 셀을 10번 쓴다. 파라미터 수는 그대로다</text>
+    </svg>
+    <figcaption>위의 셀을 토큰 수만큼 옆으로 펼친 그림이다. 네 칸은 서로 다른 층이 아니라 같은 셀을 네 번 쓴 것이다.</figcaption>
+  </figure>
+  <p>은닉 상태(hidden state) $h_t$는 $t$번째 토큰까지 읽은 내용을 요약한 벡터다. 각 위치는 앞 위치의 $h$와 자기 토큰 벡터, 이 둘만 받아서 새 $h$를 만든다. h4에는 네 토큰의 정보가 모두 섞여 들어 있다.</p>
+
+  <h2>동작 원리</h2>
+  <h3>① 토큰을 벡터로 바꾸기</h3>
+  <figure>
+    <svg viewBox="0 0 760 215" role="img" aria-label="문장이 토크나이저, 토큰 ID, 임베딩 표 조회를 거쳐 토큰 벡터가 되고, RNN은 바로 셀에 넣고 Transformer는 위치 정보를 더한 뒤 층에 넣는다">
+      <text class="m" x="380" y="18" text-anchor="middle">여기까지는 RNN과 Transformer가 같다</text>
+      <rect class="b" x="10" y="30" width="170" height="40" rx="6"/><text x="95" y="55" text-anchor="middle">나는 오늘 아침에 밥을</text>
+      <path class="ln" d="M180,50 H206" marker-end="url(#ar)"/>
+      <rect class="b" x="210" y="30" width="100" height="40" rx="6"/><text x="260" y="55" text-anchor="middle">토크나이저</text>
+      <path class="ln" d="M310,50 H336" marker-end="url(#ar)"/>
+      <rect class="b" x="340" y="30" width="150" height="40" rx="6"/><text x="415" y="55" text-anchor="middle">ID 15, 2210, 4087, 9031</text>
+      <path class="ln" d="M490,50 H516" marker-end="url(#ar)"/>
+      <rect class="b" x="520" y="30" width="130" height="40" rx="6"/><text x="585" y="55" text-anchor="middle">임베딩 표 조회</text>
+      <path class="ln" d="M650,50 H676" marker-end="url(#ar)"/>
+      <rect class="b" x="680" y="30" width="72" height="40" rx="6"/><text x="716" y="55" text-anchor="middle">벡터</text>
+
+      <path class="la" d="M700,70 L452,130" marker-end="url(#ara)"/>
+      <path class="l2" d="M725,70 L640,130" marker-end="url(#ar2)"/>
+      <rect class="ba" x="330" y="134" width="150" height="40" rx="6"/><text x="405" y="159" text-anchor="middle">RNN 셀에 차례로</text>
+      <rect class="b2" x="540" y="134" width="100" height="40" rx="6"/><text x="590" y="159" text-anchor="middle">+ 위치 정보</text>
+      <path class="ln" d="M640,154 H650" marker-end="url(#ar)"/>
+      <rect class="b" x="654" y="134" width="100" height="40" rx="6"/><text x="704" y="159" text-anchor="middle">Transformer 층</text>
+      <text class="ta" x="405" y="200" text-anchor="middle">위치 정보를 더하지 않는다</text>
+      <text class="ta2" x="647" y="200" text-anchor="middle">Transformer만 위치를 더한다</text>
+    </svg>
+    <figcaption>RNN은 토큰을 앞에서부터 차례로 읽으므로, 읽는 순서가 곧 위치 정보다.</figcaption>
+  </figure>
+  <p>토크나이저가 문장을 토큰으로 자르고 번호(ID)로 바꾸면, 임베딩 표에서 그 번호의 행을 꺼내 토큰 벡터로 쓴다. 이 과정은 <a href="transformer.html">Transformer</a> 문서의 "① 토큰 벡터 만들기"와 같고, 임베딩 표도 학습되는 파라미터다. 다른 점은 위치 정보를 더하지 않는다는 것 하나다.</p>
+  <p>RNN이 주로 쓰이던 때는 단어나 글자 단위로 자르고, 미리 학습해 둔 임베딩(Word2Vec, GloVe)을 가져다 쓰는 경우가 많았다. 요즘 Transformer는 단어보다 잘게 자르는 서브워드(BPE 등)를 쓴다. 이것은 구조의 차이가 아니라 시대의 차이다.</p>
+
+  <h3>② 한 칸씩 계산하기</h3>
+  <p><a href="attention.html">Attention</a> 문서와 같은 2차원 토큰 벡터로 따라간다. 나는 [1, 0], 오늘 [0, 2], 아침에 [1, 1], 밥을 [2, 1] 이다. 규칙은 행벡터로 $h_t = \tanh(h_{t-1} W_h + x_t W_x)$, 시작은 $h_0 = [0, 0]$, $b = 0$ 이다.</p>
+  <figure>
+    <svg viewBox="0 0 720 140" role="img" aria-label="두 행렬 W x와 W h의 값과 역할">
+      <text x="180" y="22" text-anchor="middle">W<tspan dy="4" font-size="10">x</tspan><tspan dy="-4"> : 지금 토큰을 어떻게 받아들일지</tspan></text>
+      <rect class="b" x="130" y="40" width="50" height="34"/><text class="num" x="155" y="62" text-anchor="middle">0.5</text>
+      <rect class="b" x="180" y="40" width="50" height="34"/><text class="num" x="205" y="62" text-anchor="middle">0</text>
+      <rect class="b" x="130" y="74" width="50" height="34"/><text class="num" x="155" y="96" text-anchor="middle">0</text>
+      <rect class="b" x="180" y="74" width="50" height="34"/><text class="num" x="205" y="96" text-anchor="middle">0.5</text>
+      <text class="m" x="180" y="130" text-anchor="middle">토큰 벡터를 절반으로 줄여 받는다</text>
+      <text class="ta" x="540" y="22" text-anchor="middle">W<tspan dy="4" font-size="10">h</tspan><tspan dy="-4"> : 이전 기억을 어떻게 남길지</tspan></text>
+      <rect class="ba" x="490" y="40" width="50" height="34"/><text class="num" x="515" y="62" text-anchor="middle">0.5</text>
+      <rect class="ba" x="540" y="40" width="50" height="34"/><text class="num" x="565" y="62" text-anchor="middle">0.5</text>
+      <rect class="ba" x="490" y="74" width="50" height="34"/><text class="num" x="515" y="96" text-anchor="middle">0</text>
+      <rect class="ba" x="540" y="74" width="50" height="34"/><text class="num" x="565" y="96" text-anchor="middle">0.5</text>
+      <text class="m" x="540" y="130" text-anchor="middle">기억의 첫 칸을 두 칸 모두로 퍼뜨리며 절반씩 남긴다</text>
+    </svg>
+    <figcaption>행렬 값은 계산이 쉽게 정한 것이고 학습된 값이 아니다. tanh는 합을 −1~1 사이로 누른다.</figcaption>
+  </figure>
+  <figure>
+    <div class="controls pick"></div>
+    <table id="steps"></table>
+    <p class="result" id="detail"></p>
+    <figcaption>토큰을 누르면 그 위치의 계산을 풀어서 보여준다. 각 행은 바로 윗행의 h가 나와야 시작할 수 있다.</figcaption>
+  </figure>
+  <p>마지막 $h_4$로 다음 토큰을 예측한다. $h_4$에 $W_y$ = [[2, 0, −1], [1, 1, 0]]를 곱해 어휘 3개의 점수를 내고, softmax로 확률로 바꾼다.</p>
+  <figure>
+    <table id="pred"></table>
+    <p class="result" id="loss"></p>
+    <figcaption>정답이 "먹었다"면 이 확률이 1에 가까워지도록, 역전파로 W<sub>x</sub>, W<sub>h</sub>, W<sub>y</sub>와 임베딩 표를 고친다. 이 부분은 Transformer와 같다.</figcaption>
+  </figure>
+
+  <h3>③ 출력을 쓰는 세 가지 방식</h3>
+  <figure>
+    <svg viewBox="0 0 760 250" role="img" aria-label="마지막 h 하나로 문장을 판단하기, 모든 위치의 h로 위치마다 출력하기, 마지막 h를 다른 RNN에 넘기기">
+      <rect class="b2" x="137" y="40" width="100" height="34" rx="6"/><text x="187" y="62" text-anchor="middle">긍정 / 부정</text>
+      <rect class="ba" x="20" y="130" width="34" height="28" rx="5"/><text x="37" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="75" y="130" width="34" height="28" rx="5"/><text x="92" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="130" y="130" width="34" height="28" rx="5"/><text x="147" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="185" y="130" width="34" height="28" rx="5"/><text x="202" y="149" text-anchor="middle">h</text>
+      <path class="la" d="M54,144 H71" marker-end="url(#ara)"/><path class="la" d="M109,144 H126" marker-end="url(#ara)"/><path class="la" d="M164,144 H181" marker-end="url(#ara)"/>
+      <path class="l2" d="M202,130 L195,78" marker-end="url(#ar2)"/>
+      <text x="125" y="208" text-anchor="middle">마지막 h 하나</text>
+      <text class="m" x="125" y="228" text-anchor="middle">→ 문장 전체 판단</text>
+
+      <path class="dash" d="M252,20 V235"/>
+
+      <rect class="b2" x="280" y="40" width="34" height="34" rx="5"/><text x="297" y="62" text-anchor="middle">y</text>
+      <rect class="b2" x="335" y="40" width="34" height="34" rx="5"/><text x="352" y="62" text-anchor="middle">y</text>
+      <rect class="b2" x="390" y="40" width="34" height="34" rx="5"/><text x="407" y="62" text-anchor="middle">y</text>
+      <rect class="b2" x="445" y="40" width="34" height="34" rx="5"/><text x="462" y="62" text-anchor="middle">y</text>
+      <rect class="ba" x="280" y="130" width="34" height="28" rx="5"/><text x="297" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="335" y="130" width="34" height="28" rx="5"/><text x="352" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="390" y="130" width="34" height="28" rx="5"/><text x="407" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="445" y="130" width="34" height="28" rx="5"/><text x="462" y="149" text-anchor="middle">h</text>
+      <path class="la" d="M314,144 H331" marker-end="url(#ara)"/><path class="la" d="M369,144 H386" marker-end="url(#ara)"/><path class="la" d="M424,144 H441" marker-end="url(#ara)"/>
+      <path class="l2" d="M297,130 V78" marker-end="url(#ar2)"/><path class="l2" d="M352,130 V78" marker-end="url(#ar2)"/>
+      <path class="l2" d="M407,130 V78" marker-end="url(#ar2)"/><path class="l2" d="M462,130 V78" marker-end="url(#ar2)"/>
+      <text x="380" y="208" text-anchor="middle">모든 위치의 h</text>
+      <text class="m" x="380" y="228" text-anchor="middle">→ 위치마다 출력</text>
+
+      <path class="dash" d="M508,20 V235"/>
+
+      <text class="ta3" x="660" y="32" text-anchor="middle">I · ate · rice</text>
+      <rect class="b3" x="610" y="50" width="30" height="28" rx="5"/><text x="625" y="69" text-anchor="middle">h</text>
+      <rect class="b3" x="660" y="50" width="30" height="28" rx="5"/><text x="675" y="69" text-anchor="middle">h</text>
+      <rect class="b3" x="710" y="50" width="30" height="28" rx="5"/><text x="725" y="69" text-anchor="middle">h</text>
+      <path class="l3" d="M640,64 H656" marker-end="url(#ar3)"/><path class="l3" d="M690,64 H706" marker-end="url(#ar3)"/>
+      <rect class="ba" x="525" y="130" width="30" height="28" rx="5"/><text x="540" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="570" y="130" width="30" height="28" rx="5"/><text x="585" y="149" text-anchor="middle">h</text>
+      <rect class="ba" x="615" y="130" width="30" height="28" rx="5"/><text x="630" y="149" text-anchor="middle">h</text>
+      <path class="la" d="M555,144 H566" marker-end="url(#ara)"/><path class="la" d="M600,144 H611" marker-end="url(#ara)"/>
+      <path class="la" d="M638,130 L623,82" marker-end="url(#ara)"/>
+      <text class="m" x="585" y="178" text-anchor="middle">읽는 RNN</text>
+      <text class="m" x="700" y="100" text-anchor="middle">쓰는 RNN</text>
+      <text x="635" y="208" text-anchor="middle">마지막 h → 다른 RNN</text>
+      <text class="m" x="635" y="228" text-anchor="middle">→ 문장을 다른 문장으로</text>
+    </svg>
+    <figcaption>주황 화살표가 출력이다. 같은 RNN이라도 어느 h를 꺼내 쓰느냐에 따라 할 수 있는 일이 달라진다.</figcaption>
+  </figure>
+  <table>
+    <tr><th>쓰는 h</th><th>출력</th><th>예</th></tr>
+    <tr><td>마지막 h 하나</td><td>문장 전체에 대한 판단 하나</td><td>감성 분류 (긍정/부정)</td></tr>
+    <tr><td>모든 위치의 h</td><td>위치마다 출력 하나</td><td>언어 모델의 다음 토큰 예측, 품사 태깅</td></tr>
+    <tr><td>마지막 h를 다른 RNN의 $h_0$로</td><td>새 문장</td><td>번역 (seq2seq)</td></tr>
+  </table>
+  <p>언어 모델로 학습할 때는 Transformer처럼 문장을 한 칸 밀어 위치마다 정답을 만들고, 위치마다 cross-entropy loss를 구한다. 다른 점은 순전파도 역전파도 위치를 따라 차례로 진행된다는 것이다.</p>
+  <figure>
+    <table>
+      <tr><th>위치</th><th>셀이 받는 것</th><th>정답</th></tr>
+      <tr><td class="c">1</td><td>h0 + <span class="tok hl">나는</span></td><td><span class="tok new">오늘</span></td></tr>
+      <tr><td class="c">2</td><td>h1 + <span class="tok hl">오늘</span></td><td><span class="tok new">아침에</span></td></tr>
+      <tr><td class="c">3</td><td>h2 + <span class="tok hl">아침에</span></td><td><span class="tok new">밥을</span></td></tr>
+      <tr><td class="c">4</td><td>h3 + <span class="tok hl">밥을</span></td><td><span class="tok new">먹었다</span></td></tr>
+    </table>
+    <figcaption>"나는 오늘 아침에 밥을 먹었다"에서 문제 4개가 나온다. ②의 표는 4번 행의 계산이다.</figcaption>
+  </figure>
+
+  <h3>④ 왜 병렬 계산이 안 되는가</h3>
+  <figure>
+    <svg viewBox="0 0 760 290" role="img" aria-label="RNN은 같은 층의 옆 칸 결과를 기다리고, Transformer는 아래 층의 결과만 본다는 비교">
+      <text x="190" y="26" text-anchor="middle">RNN 층 하나</text>
+      <rect class="ba" x="38" y="90" width="64" height="32" rx="6"/><text x="70" y="111" text-anchor="middle">h1</text>
+      <rect class="ba" x="118" y="90" width="64" height="32" rx="6"/><text x="150" y="111" text-anchor="middle">h2</text>
+      <rect class="ba" x="198" y="90" width="64" height="32" rx="6"/><text x="230" y="111" text-anchor="middle">h3</text>
+      <rect class="ba" x="278" y="90" width="64" height="32" rx="6"/><text x="310" y="111" text-anchor="middle">h4</text>
+      <path class="la" d="M102,106 H115" marker-end="url(#ara)"/>
+      <path class="la" d="M182,106 H195" marker-end="url(#ara)"/>
+      <path class="la" d="M262,106 H275" marker-end="url(#ara)"/>
+      <rect class="b" x="38" y="210" width="64" height="32" rx="6"/><text x="70" y="231" text-anchor="middle">나는</text>
+      <rect class="b" x="118" y="210" width="64" height="32" rx="6"/><text x="150" y="231" text-anchor="middle">오늘</text>
+      <rect class="b" x="198" y="210" width="64" height="32" rx="6"/><text x="230" y="231" text-anchor="middle">아침에</text>
+      <rect class="b" x="278" y="210" width="64" height="32" rx="6"/><text x="310" y="231" text-anchor="middle">밥을</text>
+      <path class="ln" d="M70,210 V126" marker-end="url(#ar)"/>
+      <path class="ln" d="M150,210 V126" marker-end="url(#ar)"/>
+      <path class="ln" d="M230,210 V126" marker-end="url(#ar)"/>
+      <path class="ln" d="M310,210 V126" marker-end="url(#ar)"/>
+      <text class="m ta" x="190" y="68" text-anchor="middle">같은 줄의 옆 칸 결과를 기다린다</text>
+      <text class="m" x="190" y="272" text-anchor="middle">차례로 4번 계산</text>
+
+      <path class="dash" d="M380,10 V280"/>
+
+      <text x="570" y="26" text-anchor="middle">Transformer 층 하나</text>
+      <rect class="ba" x="418" y="90" width="64" height="32" rx="6"/><text x="450" y="111" text-anchor="middle">나는′</text>
+      <rect class="ba" x="498" y="90" width="64" height="32" rx="6"/><text x="530" y="111" text-anchor="middle">오늘′</text>
+      <rect class="ba" x="578" y="90" width="64" height="32" rx="6"/><text x="610" y="111" text-anchor="middle">아침에′</text>
+      <rect class="ba" x="658" y="90" width="64" height="32" rx="6"/><text x="690" y="111" text-anchor="middle">밥을′</text>
+      <rect class="b" x="418" y="210" width="64" height="32" rx="6"/><text x="450" y="231" text-anchor="middle">나는</text>
+      <rect class="b" x="498" y="210" width="64" height="32" rx="6"/><text x="530" y="231" text-anchor="middle">오늘</text>
+      <rect class="b" x="578" y="210" width="64" height="32" rx="6"/><text x="610" y="231" text-anchor="middle">아침에</text>
+      <rect class="b" x="658" y="210" width="64" height="32" rx="6"/><text x="690" y="231" text-anchor="middle">밥을</text>
+      <path class="ln" d="M450,210 L450,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M450,210 L526,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M450,210 L604,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M450,210 L682,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M530,210 L530,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M530,210 L608,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M530,210 L686,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M610,210 L610,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M610,210 L690,126" marker-end="url(#ar)"/>
+      <path class="ln" d="M690,210 L694,126" marker-end="url(#ar)"/>
+      <text class="m ta" x="570" y="68" text-anchor="middle">옆 칸은 안 보고 아래 줄만 본다</text>
+      <text class="m" x="570" y="272" text-anchor="middle">네 칸을 동시에 계산</text>
+    </svg>
+    <figcaption>아래 줄(층의 입력)은 계산 전에 이미 다 있다. 차이는 윗줄 칸끼리 서로를 기다리느냐다.</figcaption>
+  </figure>
+  <p>RNN은 h3이 나오기 전에는 h4를 시작할 수 없어서, GPU가 많아도 한 문장 안의 위치는 차례로 계산한다. Transformer는 각 위치가 아래 줄만 참조하므로 네 위치를 행렬 곱 한 번으로 계산한다.</p>
+  <table>
+    <tr><th>자주 헷갈리는 점</th><th>사실</th></tr>
+    <tr><td>정답 문장을 몰라서 병렬이 안 되나?</td><td>아니다. 학습 때는 RNN도 문장 전체를 알고 있다. $h$가 앞에서부터 이어져야 해서 안 된다.</td></tr>
+    <tr><td>RNN은 병렬 계산을 전혀 못 하나?</td><td>여러 문장을 묶은 배치는 병렬로 처리한다. 안 되는 것은 한 문장 안의 위치 방향이다.</td></tr>
+    <tr><td>Transformer는 생성도 병렬인가?</td><td>아니다. 생성은 Transformer도 한 토큰씩 한다. 병렬의 이점은 학습 때 나온다.</td></tr>
+  </table>
+
+  <h3>⑤ 먼 토큰의 정보는 흐려진다</h3>
+  <p>"나는"의 정보는 h1 → h2 → h3 → h4를 차례로 거쳐야 "밥을" 위치에 닿는다. 아래 표는 ②의 예시에서 h1을 [0.1, 0]만큼 바꿨을 때 뒤의 $h$가 얼마나 바뀌는지(Δh)를 계산한 것이다. 한 칸을 지날 때마다 변화에 $W_h$를 곱하고, 칸마다 $1 - h_t^2$(tanh의 기울기)를 곱한다.</p>
+  <figure>
+    <table id="grad"></table>
+    <figcaption>한 칸을 지날 때마다 변화가 줄어서, h1의 영향이 세 칸 뒤에서는 처음의 5% 정도만 남는다.</figcaption>
+  </figure>
+  <p>학습 때 기울기도 같은 길을 거꾸로 지나므로, 먼 토큰에 대한 기울기가 0에 가까워진다. 이것을 기울기 소실(vanishing gradient)이라 한다. attention은 먼 토큰도 한 번에 참조해서 이 길이 짧다.</p>
+
+  <h3>⑥ Attention과 비교: h 하나에 압축한다</h3>
+  <figure>
+    <svg viewBox="0 0 760 270" role="img" aria-label="attention은 밥을 위치가 앞 토큰들의 Value를 가중치로 직접 섞고, RNN은 h3 하나만 받는다">
+      <text x="185" y="24" text-anchor="middle">Attention: Value를 직접 섞는다</text>
+      <rect class="ba" x="235" y="50" width="110" height="36" rx="6"/><text x="290" y="73" text-anchor="middle">밥을의 출력</text>
+      <rect class="b" x="20" y="180" width="70" height="34" rx="6"/><text x="55" y="202" text-anchor="middle">나는</text>
+      <rect class="b" x="105" y="180" width="70" height="34" rx="6"/><text x="140" y="202" text-anchor="middle">오늘</text>
+      <rect class="b" x="190" y="180" width="70" height="34" rx="6"/><text x="225" y="202" text-anchor="middle">아침에</text>
+      <rect class="b" x="275" y="180" width="70" height="34" rx="6"/><text x="310" y="202" text-anchor="middle">밥을</text>
+      <path class="la" d="M55,180 L258,90" style="stroke-width:1" marker-end="url(#ara)"/>
+      <path class="la" d="M140,180 L272,90" style="stroke-width:5" marker-end="url(#ara)"/>
+      <path class="la" d="M225,180 L285,90" style="stroke-width:2" marker-end="url(#ara)"/>
+      <path class="la" d="M310,180 L300,90" style="stroke-width:3" marker-end="url(#ara)"/>
+      <text class="m" x="55" y="232" text-anchor="middle">0.017</text>
+      <text class="ta" x="140" y="232" text-anchor="middle">0.566</text>
+      <text class="m" x="225" y="232" text-anchor="middle">0.138</text>
+      <text class="m" x="310" y="232" text-anchor="middle">0.279</text>
+      <text class="m" x="185" y="254" text-anchor="middle">선 굵기 = 가중치. 누구에게서 얼마나 왔는지 남는다</text>
+
+      <path class="dash" d="M380,10 V262"/>
+
+      <text x="575" y="24" text-anchor="middle">RNN: h3 하나만 받는다</text>
+      <rect class="ba" x="400" y="110" width="50" height="34" rx="6"/><text x="425" y="132" text-anchor="middle">h1</text>
+      <rect class="ba" x="470" y="110" width="50" height="34" rx="6"/><text x="495" y="132" text-anchor="middle">h2</text>
+      <rect class="b2" x="540" y="110" width="50" height="34" rx="6"/><text x="565" y="132" text-anchor="middle">h3</text>
+      <rect class="ba" x="640" y="110" width="100" height="34" rx="6"/><text x="690" y="132" text-anchor="middle">h4</text>
+      <path class="la" d="M450,127 H466" marker-end="url(#ara)"/>
+      <path class="la" d="M520,127 H536" marker-end="url(#ara)"/>
+      <path class="l2" d="M590,127 H636" marker-end="url(#ar2)"/>
+      <text class="ta2" x="565" y="80" text-anchor="middle">[0.547, 0.776]</text>
+      <text class="m" x="565" y="98" text-anchor="middle">나는·오늘·아침에가 섞인 숫자 두 개</text>
+      <rect class="b" x="655" y="180" width="70" height="34" rx="6"/><text x="690" y="202" text-anchor="middle">밥을</text>
+      <path class="ln" d="M690,180 V148" marker-end="url(#ar)"/>
+      <text class="m" x="575" y="254" text-anchor="middle">어느 숫자가 어느 토큰에서 왔는지 나눌 수 없다</text>
+    </svg>
+    <figcaption>왼쪽 가중치는 Attention 문서에서 "밥을"이 계산한 값이다. 오른쪽 h3은 ②의 표에서 나온 값이다.</figcaption>
+  </figure>
+  <p>Attention에서 "밥을" 위치는 앞 토큰들의 Value를 가중치만큼 직접 섞는다. RNN에서 "밥을" 위치가 받는 것은 h3 = [0.547, 0.776] 하나뿐이고, 그 안에 나는·오늘·아침에가 이미 섞여 있다. 문장 전체를 h 하나에 압축해야 한다는 것이 RNN의 핵심이자 한계다.</p>
+  <p>이 한계를 줄이려고 나온 것이 LSTM과 GRU이고, 압축 자체를 없앤 것이 attention이다.</p>
+
+  <h2>이론</h2>
+  <div class="theory">
+    $$ h_t = \tanh(h_{t-1} W_h + x_t W_x + b), \qquad \hat{y}_t = \mathrm{softmax}(h_t W_y) $$
+    <p>$x_t \in \mathbb{R}^{1 \times d}$: $t$번째 토큰 벡터(행벡터, ②의 $x_t$ 열). $h_t \in \mathbb{R}^{1 \times d_h}$: $t$번째 은닉 상태(그림의 파란 상자). $\hat{y}_t$: 다음 토큰의 확률표(②의 확률 열).</p>
+    <p>$W_x \in \mathbb{R}^{d \times d_h}$, $W_h \in \mathbb{R}^{d_h \times d_h}$, $W_y \in \mathbb{R}^{d_h \times V}$, $b \in \mathbb{R}^{1 \times d_h}$: 학습되는 파라미터로, 모든 위치가 같은 값을 쓴다. $V$는 어휘 수다.</p>
+    <p>②의 예시는 $d = d_h = 2$, $V = 3$, $b = 0$ 이고 행렬 값은 ②의 그림과 같다. 열벡터로 쓰는 책에서는 $W_h h_{t-1}$ 꼴이 되는데, 행렬을 전치한 같은 식이다.</p>
+  </div>
+  <div class="theory">
+    $$ \text{파라미터 수} = \underbrace{d \cdot d_h}_{W_x} + \underbrace{d_h^2}_{W_h} + \underbrace{d_h}_{b} + \underbrace{d_h \cdot V}_{W_y} \;(+\; V \cdot d \text{ 임베딩 표}) $$
+    <p>식에 문장 길이 $n$이 없다. 같은 셀을 $n$번 쓰기 때문이다. ②의 예시는 $4 + 4 + 2 + 6 = 16$개로, 4토큰이든 100토큰이든 같다.</p>
+  </div>
+  <div class="theory">
+    $$ \mathcal{L} = -\frac{1}{n} \sum_{t=1}^{n} \log \hat{y}_t[y_t] $$
+    <p>$y_t$: $t$번째 위치의 정답, 곧 $t+1$번째 토큰(③의 정답 열). $\hat{y}_t[y_t]$: 정답 토큰에 준 확률. ②의 마지막 위치에서는 $-\log 0.823 = 0.195$ 다.</p>
+  </div>
+  <div class="theory">
+    $$ h_t = f(h_{t-1}, x_t) = f(f(h_{t-2}, x_{t-1}), x_t) = \cdots $$
+    <p>$h_t$ 안에 $h_{t-1}$이, 그 안에 $h_{t-2}$가 들어 있다. 그래서 길이 $n$인 문장은 차례로 $n$번 계산해야 한다. Transformer에서 차례를 지켜야 하는 횟수는 문장 길이가 아니라 층 수 $L$이다.</p>
+  </div>
+  <div class="theory">
+    $$ \frac{\partial h_t}{\partial h_{t-1}} = W_h\, \mathrm{diag}(1 - h_t^2), \qquad \Delta h_n \approx \Delta h_1 \prod_{t=2}^{n} W_h\, \mathrm{diag}(1 - h_t^2) $$
+    <p>행벡터 표기에서 한 칸의 영향은 "$W_h$를 곱하고, 칸마다 tanh의 기울기 $1 - h_t^2$를 곱하는 것"이다. h1이 hn에 주는 영향은 이것을 $n-1$번 곱한 것이다. ⑤의 표에서 각 행이 곱 한 번이고, 마지막 행의 Δh가 그 결과다.</p>
+    <p>곱하는 행렬이 벡터를 줄이면 곱은 0으로 줄어들고(기울기 소실), 키우면 커진다(기울기 폭발). tanh의 기울기는 1 이하라서 줄어드는 쪽이 흔하다.</p>
+  </div>
+  <table>
+    <tr><th></th><th>RNN</th><th>Transformer</th></tr>
+    <tr><td>위치 $t$가 기다리는 것</td><td>같은 층의 위치 $t-1$ 결과</td><td>이전 층의 결과 (이미 있음)</td></tr>
+    <tr><td>앞 토큰 정보를 쓰는 방법</td><td>직전 $h$ 하나에 압축된 것만 받는다</td><td>앞 토큰들의 Value를 가중치로 직접 섞는다</td></tr>
+    <tr><td>위치 정보</td><td>읽는 순서 자체</td><td>위치 벡터를 더한다</td></tr>
+    <tr><td>차례로 계산하는 횟수</td><td>문장 길이 $n$</td><td>층 수 $L$</td></tr>
+    <tr><td>먼 토큰 정보가 오는 길</td><td>$h$를 여러 칸 거쳐서</td><td>attention으로 한 번에</td></tr>
+    <tr><td>층 하나의 계산량</td><td>$O(n)$</td><td>$O(n^2)$</td></tr>
+  </table>
+
+  <h2>관련 개념</h2>
+  <ul>
+    <li><a href="transformer.html">Transformer</a>: 은닉 상태를 옆으로 넘기지 않고 attention으로 다른 위치를 직접 참조하는 구조. 토큰 벡터를 만드는 과정과 학습 방법이 RNN과 같다.</li>
+    <li><a href="attention.html">Attention</a>: 먼 토큰의 정보를 한 번에 가져오는 연산. 같은 토큰 벡터로 계산한다.</li>
+  </ul>
+
+  <h2>이력</h2>
+  <ul class="history">
+    <li>2026-11-24 최초 정리 (병렬 계산이 안 되는 이유 중심)</li>
+    <li>2026-11-24 보충: RNN의 정의와 필요성, 토큰 벡터로 계산하는 예시, 출력 방식, attention과의 비교</li>
+  </ul>
+</main>
+<script>
+const T = ['나는', '오늘', '아침에', '밥을'];
+const X = [[1, 0], [0, 2], [1, 1], [2, 1]];
+const Wx = [[0.5, 0], [0, 0.5]], Wh = [[0.5, 0.5], [0, 0.5]], Wy = [[2, 0, -1], [1, 1, 0]];
+const VOCAB = ['먹었다', '먹을', '갔다'];
+const mul = (x, M) => M[0].map((_, j) => x[0] * M[0][j] + x[1] * M[1][j]);
+const add = (a, b) => a.map((v, i) => v + b[i]);
+const f = n => (Math.abs(n) < 5e-4 ? 0 : n).toFixed(3).replace(/\.?0+$/, '') || '0';
+const vec = a => '[' + a.map(f).join(', ') + ']';
+const el = id => document.getElementById(id);
+
+// 순전파: 위치마다 h_{t-1}·W_h, x_t·W_x, 합, h_t
+const S = [];
+let h = [0, 0];
+X.forEach(x => {
+  const a = mul(h, Wh), b = mul(x, Wx), s = add(a, b), prev = h;
+  h = s.map(Math.tanh);
+  S.push({prev, a, b, s, h});
+});
+
+el('steps').innerHTML = '<tr><th>위치</th><th>$x_t$</th><th>$h_{t-1} W_h$</th><th>$x_t W_x$</th><th>합</th><th>$h_t = \\tanh(\\text{합})$</th></tr>' +
+  S.map((r, i) => `<tr><td style="white-space:nowrap">${i + 1} ${T[i]}</td><td class="num">${vec(X[i])}</td><td class="num">${vec(r.a)}</td><td class="num">${vec(r.b)}</td><td class="num">${vec(r.s)}</td><td class="num hl">h${i + 1} = ${vec(r.h)}</td></tr>`).join('');
+
+// 한 위치의 계산 풀어 보기 (다시 그리는 영역이라 수식 없이 HTML만 쓴다)
+const expand = (x, M) => `[${f(x[0])}×${f(M[0][0])} + ${f(x[1])}×${f(M[1][0])}, ${f(x[0])}×${f(M[0][1])} + ${f(x[1])}×${f(M[1][1])}]`;
+function pick(i) {
+  const r = S[i], t = i + 1;
+  document.querySelectorAll('.pick').forEach(p => {
+    p.innerHTML = '풀어 볼 위치: ' + T.map((tok, j) => `<button class="tok${j === i ? ' hl' : ''}" data-i="${j}">${tok}</button>`).join('');
+  });
+  el('steps').querySelectorAll('tr').forEach((tr, j) => tr.classList.toggle('hl', j === t));
+  el('detail').innerHTML =
+    `<span class="num">h<sub>${t - 1}</sub>·W<sub>h</sub> = ${expand(r.prev, Wh)} = ${vec(r.a)}</span><br>` +
+    `<span class="num">x<sub>${t}</sub>·W<sub>x</sub> = ${expand(X[i], Wx)} = ${vec(r.b)}</span><br>` +
+    `<span class="num">합 = ${vec(r.a)} + ${vec(r.b)} = ${vec(r.s)} → tanh → <b>h<sub>${t}</sub> = ${vec(r.h)}</b></span>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.pick button');
+  if (b) pick(+b.dataset.i);
+});
+pick(3);
+
+// 마지막 h로 다음 토큰 예측
+const z = mul(h, Wy), ez = z.map(Math.exp), sum = ez.reduce((p, q) => p + q, 0), P = ez.map(v => v / sum);
+el('pred').innerHTML = '<tr><th>어휘</th><th>점수 $h_4 W_y$</th><th>확률 (softmax)</th></tr>' +
+  VOCAB.map((w, j) => `<tr${j === 0 ? ' class="hl"' : ''}><td>${w}${j === 0 ? ' (정답)' : ''}</td><td class="num">${f(z[j])}</td><td class="num"><span class="bar" style="width:${Math.round(P[j] * 140)}px"></span>${P[j].toFixed(3)}</td></tr>`).join('');
+el('loss').innerHTML = `$h_4 =$ <span class="num">${vec(h)}</span> &nbsp;·&nbsp; loss $= -\\log ${P[0].toFixed(3)} = ${(-Math.log(P[0])).toFixed(3)}$`;
+
+// h1을 [0.1, 0]만큼 바꿨을 때 뒤로 전해지는 변화: Δh_t = (Δh_{t-1}·W_h) ⊙ (1 − h_t²)
+let d = [0.1, 0];
+let grad = '<tr><th>위치</th><th>$h_t$</th><th>$1 - h_t^2$</th><th>$\\Delta h_t$</th><th>크기 $\\lVert \\Delta h_t \\rVert$</th></tr>';
+S.forEach((r, i) => {
+  const g = r.h.map(v => 1 - v * v);
+  if (i) d = mul(d, Wh).map((v, j) => v * g[j]);
+  const n = Math.hypot(...d);
+  grad += `<tr><td style="white-space:nowrap">h${i + 1} (${T[i]})</td><td class="num">${vec(r.h)}</td><td class="num">${i ? vec(g) : '-'}</td><td class="num">${vec(d)}</td>` +
+    `<td class="num hl"><span class="bar" style="width:${Math.round(n * 1200)}px"></span>${n.toFixed(3)}</td></tr>`;
+});
+el('grad').innerHTML = grad;
+</script>
+</body>
+</html>
