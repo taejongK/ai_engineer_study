@@ -9,8 +9,9 @@
   --accent-3: #2b8a3e;
   --soft: #eef3fe;
 }
+/* 다크 색: 기기 설정이 다크이고 라이트를 고르지 않았을 때, 또는 버튼으로 다크를 골랐을 때. 값은 두 블록이 같아야 한다 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #16181c;
     --surface: #1f2228;
     --text: #e6e6e3;
@@ -21,6 +22,17 @@
     --accent-3: #69c97c;
     --soft: #232b3d;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #16181c;
+  --surface: #1f2228;
+  --text: #e6e6e3;
+  --muted: #9aa0aa;
+  --border: #33373f;
+  --accent: #7aa7ff;
+  --accent-2: #ff9a62;
+  --accent-3: #69c97c;
+  --soft: #232b3d;
 }
 
 * { box-sizing: border-box; }
@@ -92,3 +104,25 @@ td.off, tr.off td { color: var(--muted); opacity: 0.55; }
 td.c { text-align: center; }
 .result { text-align: center; margin: 12px 0 0; }
 .cols { display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+
+/* 사이트 공통: 문서 위 메뉴, 문서 아래 이전/다음, 홈의 카드 목록 (site.js가 그린다) */
+.topnav { max-width: 820px; margin: -16px auto 28px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 0.95rem; }
+.topnav a { text-decoration: none; }
+.topnav details { position: relative; }
+.topnav .push { margin-left: auto; }
+.topnav button { font-size: 0.85rem; }
+.topnav summary { cursor: pointer; color: var(--accent); }
+.topnav details div { position: absolute; right: 0; z-index: 10; min-width: 240px; margin-top: 6px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.topnav details b { display: block; margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
+.topnav details a, .topnav details span { display: block; padding: 2px 0; }
+.topnav details span { color: var(--muted); }
+.pager { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); }
+.pager a { text-decoration: none; font-weight: 600; }
+.pager a:last-child { text-align: right; }
+.pager small { display: block; font-weight: 400; color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.card { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); text-decoration: none; }
+.card:hover { border-color: var(--accent); }
+.card strong { font-size: 1.1rem; color: var(--accent); }
+.card span { font-size: 0.95rem; }
+.card small { margin-top: auto; color: var(--muted); }
